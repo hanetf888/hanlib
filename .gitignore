@@ -1,0 +1,5 @@
+.vscode/launch.json
+.env
+.vscode/settings.json
+tests && mv Ydev-hanlib-markhanliblibtestsconftest.py Ydev-hanlib-markhanlibtests
+tests && mv Ydev-hanlib-markhanliblibtestspytest.ini Ydev-hanlib-markhanlibtests

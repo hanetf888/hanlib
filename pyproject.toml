@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hanetf-common"
+version = "1.0.0"
+description = "Shared utilities for HANetf projects"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pandas",
+    "psycopg2-binary",
+    "sqlalchemy",
+    "python-dotenv",
+    "numpy",
+    "pyodbc",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
