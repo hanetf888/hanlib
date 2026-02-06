@@ -1,6 +1,8 @@
-.vscode/launch.json
+.vscode/
 .env
-.vscode/settings.json
 tests && mv Ydev-hanlib-markhanliblibtestsconftest.py Ydev-hanlib-markhanlibtests
 tests && mv Ydev-hanlib-markhanliblibtestspytest.ini Ydev-hanlib-markhanlibtests
 .claude/settings.local.json
+dev-hanlib-mark.code-workspace
+src/hanlib/__pycache__/
+src/hanetf_common.egg-info/
