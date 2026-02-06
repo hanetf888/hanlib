@@ -6,3 +6,4 @@ tests && mv Ydev-hanlib-markhanliblibtestspytest.ini Ydev-hanlib-markha
 dev-hanlib-mark.code-workspace
 src/hanlib/__pycache__/
 src/hanetf_common.egg-info/
+tests/__pycache__/

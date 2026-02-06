@@ -223,6 +223,30 @@ When you make changes to the shared package:
 
 ---
 
+## Step 11: Upgrading the Package on Other Machines
+
+After you've committed and pushed changes to GitHub, run the following on each machine where the package is installed to upgrade it.
+
+### Upgrade to the latest commit on main
+```powershell
+pip install --upgrade git+ssh://git@github.com/hanetf888/hanlib.git
+```
+
+### Upgrade to a specific tagged version
+```powershell
+pip install --upgrade git+ssh://git@github.com/hanetf888/hanlib.git@v1.1.0
+```
+
+### Editable installs (development mode)
+
+If the package was installed with `pip install -e .`, it automatically picks up code changes whenever you `git pull` — no reinstall needed:
+```powershell
+cd hanetf-common
+git pull
+```
+
+---
+
 ## Troubleshooting
 
 ### SSH Permission Denied
