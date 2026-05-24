@@ -1,152 +1,107 @@
 import os
-import shutil
 import logging
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+import subprocess
 from dotenv import load_dotenv
-import sys
+
 load_dotenv()
 
-# --- Configuration ---
-
-# Set logging level to DEBUG to see all sync actions
 
 def setup_logging():
     logging.basicConfig(
-            # filename = os.getenv("LOG_FILE"),
-            # filemode = os.getenv("LOG_MODE", "a"),
             level=os.getenv("LOG_LEVEL", "INFO"),
             format=os.getenv("LOG_FORMAT", "%(asctime)s | %(levelname)s | %(message)s"),
             datefmt=os.getenv("LOG_DATEFMT", "%Y-%m-%d %H:%M:%S")
         )
 
 
-def _copy_file(source_path, destination_path):
+def _parse_robocopy_summary(output):
     """
-    Copy a single file from source to destination.
+    Parse the job summary block at the end of robocopy stdout.
 
-    Args:
-        source_path (str): Full path to the source file.
-        destination_path (str): Full path to the destination file.
+    The block looks like:
+                   Total    Copied   Skipped  Mismatch    FAILED    Extras
+        Dirs :         3         2         1         0         0         0
+       Files :        10         5         5         0         0         0
 
-    Returns:
-        tuple: (success, filename, error_message or None)
+    Returns a stats dict matching the existing public contract.
     """
-    filename = os.path.basename(source_path)
-    try:
-        shutil.copy2(source_path, destination_path)  # copy2 preserves metadata
-        logging.debug(f"COPIED/UPDATED: {filename}")
-        return (True, filename, None)
-    except Exception as e:
-        logging.error(f"Failed to copy {filename}: {e}")
-        return (False, filename, str(e))
-
-
-def synchronise_folders(source, destination, delete_missing=False, max_workers=8):
-    """
-    Performs a one-way synchronization from source to destination.
-
-    Args:
-        source (str): The folder to copy from.
-        destination (str): The folder to copy to.
-        delete_missing (bool): If True, files in dest not found in source are deleted.
-        max_workers (int): Maximum number of parallel copy threads (default 8).
-
-    Returns:
-        dict: Statistics about the synchronization operation.
-    """
-    logging.info(f"Starting Synchronization (Delete Missing: {delete_missing}) from: {source} to: {destination}...")
-
     stats = {
         'files_examined': 0,
         'files_copied': 0,
         'files_skipped': 0,
         'files_deleted': 0,
         'folders_deleted': 0,
-        'errors': 0
+        'errors': 0,
     }
-    stats_lock = threading.Lock()
 
-    source_files = set()
-    dest_files = set()
-    files_to_copy = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('Files :'):
+            parts = stripped.split(':', 1)[1].split()
+            if len(parts) >= 6:
+                stats['files_examined'] = int(parts[0])
+                stats['files_copied'] = int(parts[1])
+                stats['files_skipped'] = int(parts[2])
+                stats['errors'] = int(parts[4])
+                stats['files_deleted'] = int(parts[5])
+        elif stripped.startswith('Dirs :'):
+            parts = stripped.split(':', 1)[1].split()
+            if len(parts) >= 6:
+                stats['folders_deleted'] = int(parts[5])
+                stats['errors'] += int(parts[4])
 
-    # --- Scan source directory using scandir for efficiency ---
-    with os.scandir(source) as entries:
-        for entry in entries:
-            source_files.add(entry.name)
-            if entry.is_file():
-                stats['files_examined'] += 1
-                source_path = entry.path
-                destination_path = os.path.join(destination, entry.name)
-                source_mtime = entry.stat().st_mtime
+    return stats
 
-                # Check if file needs copying
-                needs_copy = False
-                if not os.path.exists(destination_path):
-                    needs_copy = True
-                else:
-                    try:
-                        dest_mtime = os.path.getmtime(destination_path)
-                        if source_mtime > dest_mtime:
-                            needs_copy = True
-                    except OSError:
-                        needs_copy = True
 
-                if needs_copy:
-                    files_to_copy.append((source_path, destination_path))
-                else:
-                    stats['files_skipped'] += 1
+def synchronise_folders(source, destination, delete_missing=False, recursive=False, max_workers=8):
+    """
+    One-way synchronisation from source to destination using robocopy.
 
-    # --- Scan destination directory using scandir ---
-    try:
-        with os.scandir(destination) as entries:
-            for entry in entries:
-                dest_files.add(entry.name)
-    except FileNotFoundError:
-        pass  # Destination may not have any files yet
+    Args:
+        source (str): The folder to copy from.
+        destination (str): The folder to copy to.
+        delete_missing (bool): If True, files/folders in dest not found in source are deleted (/PURGE).
+        recursive (bool): If True, include subdirectories (/E).
+        max_workers (int): Number of robocopy worker threads (/MT:N).
 
-    # --- Parallel copy phase ---
-    if files_to_copy:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(_copy_file, src, dst): (src, dst)
-                for src, dst in files_to_copy
-            }
-            for future in as_completed(futures):
-                success, filename, error = future.result()
-                with stats_lock:
-                    if success:
-                        stats['files_copied'] += 1
-                    else:
-                        stats['errors'] += 1
+    Returns:
+        dict: {files_examined, files_copied, files_skipped, files_deleted, folders_deleted, errors}
 
-    # --- Deletion Phase (Destination Cleanup) ---
+    Raises:
+        FileNotFoundError: if source does not exist.
+    """
+    if not os.path.isdir(source):
+        raise FileNotFoundError(f"Source folder does not exist: {source}")
+
+    os.makedirs(destination, exist_ok=True)
+
+    logging.info(f"Starting Synchronization (Delete Missing: {delete_missing}, "
+                 f"Recursive: {recursive}) from: {source} to: {destination}...")
+
+    cmd = [
+        'robocopy', source, destination,
+        f'/MT:{max_workers}',
+        '/R:1',
+        '/W:1',
+        '/NP',
+        '/NDL',
+        '/NFL',
+    ]
+    if recursive:
+        cmd.append('/E')
     if delete_missing:
-        for filename in dest_files:
-            destination_path = os.path.join(destination, filename)
+        cmd.append('/PURGE')
 
-            # Check if the file exists in the destination but NOT in the source
-            if filename not in source_files:
-                if os.path.isfile(destination_path):
-                    try:
-                        os.remove(destination_path)
-                        logging.warning(f"DELETED: {filename} (Not found in source)")
-                        stats['files_deleted'] += 1
-                    except Exception as e:
-                        logging.error(f"Failed to delete {filename}: {e}")
-                        stats['errors'] += 1
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
-                # Check if the folder exists in the destination but NOT in the source
-                elif os.path.isdir(destination_path):
-                    try:
-                        shutil.rmtree(destination_path)
-                        logging.warning(f"DELETED FOLDER: {filename} (Not found in source)")
-                        stats['folders_deleted'] += 1
-                    except Exception as e:
-                        logging.error(f"Failed to delete folder {filename}: {e}")
-                        stats['errors'] += 1
+    # Robocopy exit codes: 0-7 = success variants, 8+ = failure
+    if result.returncode >= 8:
+        logging.error(f"Robocopy failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}")
+
+    stats = _parse_robocopy_summary(result.stdout)
+    if result.returncode >= 8 and stats['errors'] == 0:
+        stats['errors'] = 1
 
     logging.info(f"Synchronization complete for {source} to {destination}. "
                  f"Examined: {stats['files_examined']}, Copied: {stats['files_copied']}, "
@@ -154,52 +109,6 @@ def synchronise_folders(source, destination, delete_missing=False, max_workers=8
                  f"Errors: {stats['errors']}")
 
     return stats
-
-
-def synchronise_folders_recursive(source, destination, delete_missing=False, sync_subfolders=False, max_workers=8):
-    """
-    Performs synchronization from source to destination, optionally including subfolders.
-
-    Args:
-        source (str): The folder to copy from.
-        destination (str): The folder to copy to.
-        delete_missing (bool): If True, files in dest not found in source are deleted.
-        sync_subfolders (bool): If True, recursively synchronise all subfolders.
-        max_workers (int): Maximum number of parallel copy threads (default 8).
-
-    Returns:
-        dict: Aggregated statistics about the synchronization operation.
-    """
-    # synchronise the current folder
-    total_stats = synchronise_folders(source, destination, delete_missing=delete_missing, max_workers=max_workers)
-
-    # If sync_subfolders is enabled, process all subdirectories
-    if sync_subfolders:
-        try:
-            with os.scandir(source) as entries:
-                for entry in entries:
-                    if entry.is_dir():
-                        source_path = entry.path
-                        destination_path = os.path.join(destination, entry.name)
-
-                        # Create destination subfolder if it doesn't exist
-                        if not os.path.exists(destination_path):
-                            os.makedirs(destination_path)
-                            logging.info(f"Created subdirectory: {destination_path}")
-
-                        # Recursively synchronise the subfolder
-                        sub_stats = synchronise_folders_recursive(
-                            source_path, destination_path, delete_missing, sync_subfolders, max_workers
-                        )
-
-                        # Aggregate stats
-                        for key in total_stats:
-                            total_stats[key] += sub_stats.get(key, 0)
-
-        except FileNotFoundError as e:
-            logging.error(f"Source or destination not found: {source} {destination}: {e}")
-
-    return total_stats
 
 
 def run_task(curdate, config):
@@ -214,18 +123,15 @@ def run_task(curdate, config):
     Returns:
         dict: Result with runflag, returnstatus, and report
     """
+    source_folder = config.get("source_folder")
+    destination_folder = config.get("destination_folder")
     try:
-        source_folder = config.get("source_folder")
-        destination_folder = config.get("destination_folder")
-        delete_missing = config.get("delete_missing", False)
-        sync_subfolders = config.get("synchronise_folders_recursive", False)
-        max_workers = config.get("max_workers", 8)
-
-        stats = synchronise_folders_recursive(
-            source_folder, destination_folder,
-            delete_missing=delete_missing,
-            sync_subfolders=sync_subfolders,
-            max_workers=max_workers
+        stats = synchronise_folders(
+            source_folder,
+            destination_folder,
+            delete_missing=config.get("delete_missing", False),
+            recursive=config.get("synchronise_folders_recursive", False),
+            max_workers=config.get("max_workers", 8),
         )
     except FileNotFoundError as e:
         return {
@@ -243,14 +149,13 @@ def run_task(curdate, config):
     }
 
 
-# Backward compatibility alias
 runTask = run_task
 
 
 def parse_args():
     """Parse command-line arguments using argparse."""
     parser = argparse.ArgumentParser(
-        description="Synchronise folders from source to destination.",
+        description="Synchronise folders from source to destination (robocopy backend).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -260,14 +165,8 @@ Examples:
   python syncfolder.py /source/path /dest/path --recursive --workers 16
         """
     )
-    parser.add_argument(
-        "source",
-        help="Source directory to copy from"
-    )
-    parser.add_argument(
-        "destination",
-        help="Destination directory to copy to"
-    )
+    parser.add_argument("source", help="Source directory to copy from")
+    parser.add_argument("destination", help="Destination directory to copy to")
     parser.add_argument(
         "-d", "--delete-missing",
         action="store_true",
@@ -284,7 +183,7 @@ Examples:
         "-w", "--workers",
         type=int,
         default=8,
-        help="Number of parallel copy threads (default: 8)"
+        help="Number of robocopy worker threads (default: 8)"
     )
     return parser.parse_args()
 
@@ -292,11 +191,11 @@ Examples:
 if __name__ == "__main__":
     setup_logging()
     args = parse_args()
-    stats = synchronise_folders_recursive(
+    stats = synchronise_folders(
         args.source,
         args.destination,
         delete_missing=args.delete_missing,
-        sync_subfolders=args.recursive,
+        recursive=args.recursive,
         max_workers=args.workers
     )
     print(f"\nSynchronization Summary:")

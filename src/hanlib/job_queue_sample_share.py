@@ -100,7 +100,14 @@ def sample_4():
         "cc": ["karen.kiwanuka@hanetf.com"],
         "bcc": ["ramon.williams@hanetf.com"],
         "body_text": None,
-        "body_html": html,
+        "body_html": """
+                <h2 style="margin:0 0 8px 0;">HTML File Email Test</h2>
+                <p>
+                  This is a <strong>bold</strong>, <em>italic</em>, and
+                  <span style="text-decoration:underline;">underlined</span> paragraph with a
+                  <a href="https://hanetf.com">link</a>.
+                </p>
+            """,
         "attachments": [filepath_1],
         "draft_or_send": "send"
     }
