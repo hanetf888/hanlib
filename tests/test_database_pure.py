@@ -260,16 +260,27 @@ class TestSqliteDatabase:
         assert result.shape == (1, 2)
 
     def test_query_write_executes_dml(self, sqlite_db):
-        # NOTE: sqliteDatabase doesn't register numpy adapters for sqlite3,
-        # so int columns from a pandas frame land in the DB as BLOBs and
-        # numeric predicates (e.g. `where id = 1`) won't match. Filter on a
-        # text column instead.
         df = pd.DataFrame({"id": [1, 2], "name": ["a", "b"]})
         sqlite_db.createTable(df, "mytable")
-        sqlite_db.query("delete from mytable where name = 'a'", write=True, commit=True)
+        sqlite_db.query("delete from mytable where id = 1", write=True, commit=True)
         result = sqlite_db.query("select * from mytable")
         assert result.shape == (1, 2)
-        assert result.iloc[0]["name"] == "b"
+        assert int(result.iloc[0]["id"]) == 2
+
+    def test_numpy_int_columns_stored_as_integers(self, sqlite_db):
+        df = pd.DataFrame({"id": [10, 20, 30], "name": ["a", "b", "c"]})
+        sqlite_db.createTable(df, "mytable")
+        # Numeric predicate must actually match, not silently miss the row.
+        result = sqlite_db.query("select * from mytable where id = 20")
+        assert result.shape == (1, 2)
+        assert int(result.iloc[0]["id"]) == 20
+
+    def test_numpy_float_columns_stored_as_real(self, sqlite_db):
+        df = pd.DataFrame({"id": [1, 2], "price": [1.5, 2.75]})
+        sqlite_db.createTable(df, "prices")
+        result = sqlite_db.query("select * from prices where price > 2.0")
+        assert result.shape == (1, 2)
+        assert float(result.iloc[0]["price"]) == 2.75
 
     def test_query_returns_dataframe(self, sqlite_db):
         df = pd.DataFrame({"id": [1, 2], "name": ["a", "b"]})

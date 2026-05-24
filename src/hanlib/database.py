@@ -33,6 +33,13 @@ register_adapter(np.int64, AsIs)
 register_adapter(np.int32, AsIs)
 register_adapter(np.float64, lambda x: AsIs(float(x)))
 
+# sqlite3 adapters: without these, numpy scalar values from pandas frames
+# are written as raw 8-byte BLOBs, so numeric predicates silently miss rows.
+sqlite3.register_adapter(np.int64, int)
+sqlite3.register_adapter(np.int32, int)
+sqlite3.register_adapter(np.float64, float)
+sqlite3.register_adapter(np.float32, float)
+
 def castAsString(data):
 
     """Casts the specified data piece as a string with correct formatting for dates."""
