@@ -280,11 +280,11 @@ def cleanHeaders(dataframe, table_name, flavour):
 
     elif flavour == 'postgres':
 
-        if table_name.find('real.') >= 0 or table_name.find('temp.') >= 0:
+        if table_name.find('real.') >= 0 or table_name.find('temp.') >= 0 or table_name.find('data.') >= 0:
 
             table_prefix = table_name[5:]
 
-        elif table_name.find('raw.') >= 0 or table_name.find('data.') >= 0:
+        elif table_name.find('raw.') >= 0:
 
             table_prefix = table_name[4:]
 

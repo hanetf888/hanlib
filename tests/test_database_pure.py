@@ -6,12 +6,17 @@ and use sqlite in tmp_path so they can run in any environment.
 """
 import os
 import sqlite3
+import sys
 from datetime import date, datetime
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 import pandas as pd
 import numpy as np
+
+# Test against the local repo source, not the pip-installed hanetf-common.
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from hanlib import database
 
@@ -110,11 +115,14 @@ class TestCleanHeaders:
         assert "name" in result.columns
 
     def test_postgres_strips_data_schema(self):
-        # NOTE: source bug — for 'data.*' the strip is [4:] not [5:],
-        # so the leading '.' is left in the prefix. Locking in current behaviour.
         df = pd.DataFrame(columns=["date", "name"])
         result = database.cleanHeaders(df, "data.navs", "postgres")
-        assert ".navs_date" in result.columns
+        assert "navs_date" in result.columns
+
+    def test_postgres_strips_raw_schema(self):
+        df = pd.DataFrame(columns=["date"])
+        result = database.cleanHeaders(df, "raw.feed", "postgres")
+        assert "feed_date" in result.columns
 
     def test_postgres_strips_real_schema(self):
         df = pd.DataFrame(columns=["value"])
